@@ -1,0 +1,452 @@
+ccnPDAY5:
+NexusTask1:
+@all
+config t
+hostname Leaf1NXos
+boot nxos bootflash:nxos.9.3.8.bin
+username admin password C1sc0123 role priv-15
+
+@SPINE
+config t
+nv overlay evpn
+feature ospf
+feature bgp
+feature pim
+feature nv overlay
+
+@LEAF:
+show feature
+config t
+nv overlay evpn
+feature ospf
+feature bgp
+feature pim
+feature interface-vlan
+feature vn-segment-vlan-based
+feature nv overlay
+!arp suppression on TCAM resource
+show system internal access-list globals
+
+TASK2: IF YOU ang pang Mahirap na PC:
+config t
+hardware access-list tcam region ifacl 0
+hardware access-list tcam region vacl 0
+hardware access-list tcam region racl 0
+hardware access-list tcam region mac-ifacl 256
+hardware access-list tcam region vpc-convergence 0
+hardware access-list tcam region arp-ether 256 double-wide
+end
+copy run start
+reload
+
+for newerversions:
+config t
+hardware access-list tcam region arp-ether 256 double-wide
+
+TASK3: loopbacks!
+@spine:
+config t
+interface loopback0
+  description router id
+  ip address 10.1.0.1/32
+  no shut
+interface loopback254
+  description vtep and rp
+  ip address 10.1.254.254/32
+  no shut
+
+@LEAF1:
+config t
+interface loopback0
+  ip address 10.1.0.2/32
+  no shut
+interface loopback254
+  ip address 10.1.254.2/32
+  no shut
+  
+@LEAF2:
+config t
+interface loopback0
+  ip address 10.1.0.3/32
+  ip ospf network point-to-point
+  no shut
+interface loopback254
+  ip address 10.1.254.3/32
+  no shut
+
+TASK4: CONFIGURE THE PHYSICAL INTS for underlay of OSPF/BGP
+
+@SPINE:
+interface Ethernet1/1
+  description LEAF1
+  no switchport
+  mtu 9216
+  medium p2p
+  ip unnumbered loopback0
+  no shutdown
+interface Ethernet1/2
+  description LEAF2
+  no switchport
+  mtu 9216
+  medium p2p
+  ip unnumbered loopback0
+  no shutdown
+
+@LEAF1:
+config t
+interface Ethernet1/1
+  description SPINE1
+  no switchport
+  mtu 9216
+  medium p2p
+  ip unnumbered loopback0
+  no shutdown
+  
+@LEAF2:
+config t
+interface Ethernet1/1
+  description SPINE1
+  no switchport
+  mtu 9216
+  medium p2p
+  ip unnumbered loopback0
+  no shutdown
+  
+@ALL
+show ip int brief:
+
+TASK5: CONFIGURE THE UNDERLAY PROTOCOL: ospf
+
+@SPINEl:
+config t
+router ospf 254
+router-id 10.1.0.1
+log-adjacency-changes-detail
+int lo 0
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int lo 254
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int e1/1
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int e1/2
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+ end
+
+
+@LEAF1:
+config t
+router ospf 254
+router-id 10.1.0.2
+log-adjacency-changes-detail
+int lo 0
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int lo 254
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int e1/1
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+end
+
+@LEAF2:
+config t
+router ospf 254
+router-id 10.1.0.3
+log-adjacency-changes-detail
+int lo 0
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int lo 254
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+int e1/1
+ ip router ospf 254 area 0
+ ip ospf network point-to-point
+end
+
+TASK6: Multicast Routing: PIM sparse-mode good for RP point.
+@SPINE:
+config t
+!this is the RP        
+ip pim anycast-rp 10.1.254.254 10.1.0.2
+!accept from privatemulticast
+ip pim rp-address 10.1.254.254 group-list 239.239.239.0/24
+!config pim sparse mode
+int lo0
+ ip pim sparse-mode
+int lo254
+ ip pim sparse-mode
+int e1/1
+ ip pim sparse-mode
+int e1/2
+ ip pim sparse-mode
+ 
+@LEaf1: rp and allowMusticast:
+config t
+ip pim rp-address 10.1.254.254 group-list 239.239.239.0/24
+int lo0
+ ip pim sparse-mode
+int lo254
+ ip pim sparse-mode
+int e1/1
+ ip pim sparse-mode
+end
+ 
+@leaf2:
+config t
+ip pim rp-address 10.1.254.254 group-list 239.239.239.0/24
+int lo0
+ ip pim sparse-mode
+int lo254
+ ip pim sparse-mode
+int e1/1
+ ip pim sparse-mode
+end
+
+TASK6:
+@Leaf1:
+config t
+vlan 3001
+name VNI3-RIVAN
+ vn-segment 31001
+ exit
+vrf context RIVANVRF
+ vni 31001
+ rd auto
+ address-family ipv4 unicast
+  route-target both auto
+  route-target both auto evpn
+  exit
+  exit
+int vlan 3001
+  no shut
+  mtu 9216
+  vrf member RIVANVRF
+  ip forward
+  exit
+int nve1
+  !vtep interface for vxlan routng
+  no shut
+  source-interface loopback 254
+  host-reachability protocol bgp
+  member vni 31001 associate-vrf
+end
+copy run start
+
+@Leaf2:
+config t
+vlan 3001
+name VNI3-RIVAN
+ vn-segment 31001
+ exit
+vrf context RIVANVRF
+ vni 31001
+ rd auto
+ address-family ipv4 unicast
+ route-target both auto
+ route-target both auto evpn
+  exit
+  exit
+int vlan 3001
+  no shut
+  mtu 9216
+  vrf member RIVANVRF
+  ip forward
+  exit
+int nve1
+  !vtep interface for vxlan routng
+  no shut
+  source-interface loopback 254
+  host-reachability protocol bgp
+  member vni 31001 associate-vrf
+end
+copy run start
+
+Task7: vlans for clients:
+@leaf1:
+config t
+vlan 201
+name servers
+vn-segment 31201
+int e1/6
+ switchport
+ switchport access vlan 201
+ no shut
+ end
+ show vlan id 201
+ 
+@leaf2:
+config t
+vlan 201
+name servers
+vn-segment 31201
+int e1/6
+ switchport
+ switchport access vlan 201
+ no shut
+ end
+ show vlan id 201
+  
+  
+@make vlan 201 routable and get multicast Traffic.
+@leaf1:
+config t
+route-map RIVAN-MAP permit 10
+ match tag 31001
+ exit
+ !make a virtualIP shared among leafswitches for vlan201
+ fabric forwarding anycast-gateway-mac 0000.0000.00aa
+ int vlan 201
+  no shut
+  vrf member RIVANVRF
+  ip add 10.1.201.1/24 tag 31001
+  !this int/and IP will be anycast Gateway
+  fabric forwarding mode  anycast-gateway
+  end
+  
+@leaf2:
+config t
+route-map RIVAN-MAP permit 10
+ match tag 31001
+ exit
+ !make a virtualIP shared among leafswitches for vlan201
+ fabric forwarding anycast-gateway-mac 0000.0000.00aa
+ int vlan 201
+  no shut
+  vrf member RIVANVRF
+  ip add 10.1.201.1/24 tag 31001
+  !this int/and IP will be anycast Gateway
+  fabric forwarding mode  anycast-gateway
+  end
+  
+ @@@basic TEST:
+
+R2:
+config t
+int e0/0
+no shut
+ip add 10.1.201.100 255.255.255.0
+end
+
+R4:
+config t
+int e0/0
+no shut
+ip add 10.1.201.101 255.255.255.0
+end
+
+
+TAsk8:
+@leaf1:
+config t
+int nve1
+ member vni 31201
+  suppress-arp
+  !filterArpflooding
+  !specify multicastAddress
+  mcast-group 239.239.239.201
+  
+@leaf2:
+config t
+int nve1
+ member vni 31201
+  suppress-arp
+  !filterArpflooding
+  !specify multicastAddress
+  mcast-group 239.239.239.201
+
+TASK9: OVERLAY PROTOCOL BGP!!! eVPN:
+!Bgp routing spine/leafs
+@SPINE:
+config t
+router bgp 65500
+  router-id 10.1.0.1
+  address-family ipv4 unicast
+  !bagoTo, subnetONLY
+  neighbor 10.1.0.0/24 remote-as 65500
+    update-source loopback0
+    address-family ipv4 unicast
+    address-family l2vpn evpn
+      send-community both
+      send-community extended
+      route-reflector-client
+	end
+	
+@leaf1:
+config t
+router bgp 65500
+  router-id 10.1.0.2
+  address-family ipv4 unicast
+  neighbor 10.1.0.3
+    remote-as 65500
+    update-source loopback0
+    address-family ipv4 unicast
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+  vrf RIVANVRF
+    address-family ipv4 unicast
+      advertise l2vpn evpn
+      redistribute direct route-map RIVAN-MAP
+	  end
+	  
+@leaf2:
+config t
+router bgp 65500
+  router-id 10.1.0.3
+  address-family ipv4 unicast
+  neighbor 10.1.0.2
+    remote-as 65500
+    update-source loopback0
+    address-family ipv4 unicast
+    address-family l2vpn evpn
+      send-community
+      send-community extended
+  vrf RIVANVRF
+    address-family ipv4 unicast
+      advertise l2vpn evpn
+      redistribute direct route-map RIVAN-MAP
+	  end
+	  
+@check
+show bgp l2vpn evpn summary
+
+TASK10:
+@leaf1:
+config t
+evpn
+ vni 31201 l2
+  rd auto
+  route-target import auto
+  route-target export auto
+  end
+  
+@leaf2:
+config t
+evpn
+  vni 31201 l2
+    rd auto
+    route-target import auto
+    route-target export auto
+	end
+	
+@@check
+show bgp l2vpn evpn summary
+
+
+
+
+
+  
+  
+  
+  
+  
+  
+  
+
